@@ -88,14 +88,14 @@ const initialNodes: Node[] = [
 ];
 
 const initialEdges: FlowEdge[] = [
-  { id: 'e-c1-h', source: 'capture-1', target: 'transport-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
-  { id: 'e-c2-h', source: 'capture-2', target: 'transport-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
-  { id: 'e-h-w', source: 'transport-1', target: 'transport-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
-  { id: 'e-h-e', source: 'transport-1', target: 'transport-3', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
-  { id: 'e-w-s1', source: 'transport-2', target: 'storage-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
-  { id: 'e-w-s2', source: 'transport-2', target: 'storage-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
-  { id: 'e-e-s2', source: 'transport-3', target: 'storage-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
-  { id: 'e-e-u1', source: 'transport-3', target: 'utilization-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
+  { id: 'e-c1-h', source: 'capture-1', target: 'transport-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 100 } },
+  { id: 'e-c2-h', source: 'capture-2', target: 'transport-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 100 } },
+  { id: 'e-h-w', source: 'transport-1', target: 'transport-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 50 } },
+  { id: 'e-h-e', source: 'transport-1', target: 'transport-3', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 50 } },
+  { id: 'e-w-s1', source: 'transport-2', target: 'storage-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 50 } },
+  { id: 'e-w-s2', source: 'transport-2', target: 'storage-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 50 } },
+  { id: 'e-e-s2', source: 'transport-3', target: 'storage-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 50 } },
+  { id: 'e-e-u1', source: 'transport-3', target: 'utilization-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 50 } },
 ];
 
 const frameworkInfo: Record<string, { label: string; description: string }> = {
@@ -126,15 +126,28 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
   const [durationMinutes, setDurationMinutes] = useState('12');
 
   const displayEdges = useMemo(
-    () =>
-      edges.map((edge) => ({
+    () => {
+      const getEdgeWeight = (edge: FlowEdge) => {
+        const rawWeight = Number((edge.data as WeightedEdgeData | undefined)?.weight ?? 100);
+        return Number.isFinite(rawWeight) && rawWeight >= 0 ? rawWeight : 0;
+      };
+
+      return edges.map((edge) => {
+        const siblingEdges = edges.filter((e) => e.source === edge.source);
+        const totalWeight = siblingEdges.reduce((sum, e) => sum + getEdgeWeight(e), 0);
+        const edgeWeight = getEdgeWeight(edge);
+        const sharePct = totalWeight > 0 ? (edgeWeight / totalWeight) * 100 : (siblingEdges.length > 0 ? 100 / siblingEdges.length : 100);
+
+        return {
         ...edge,
-        label: `w=${((edge.data as WeightedEdgeData | undefined)?.weight ?? 1).toFixed(1)}`,
+        label: `${sharePct.toFixed(0)}%`,
         labelStyle: { fill: '#334155', fontSize: 11, fontWeight: 600 },
         labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
         labelBgPadding: [4, 2] as [number, number],
         labelBgBorderRadius: 3,
-      })),
+        };
+      });
+    },
     [edges]
   );
 
@@ -162,9 +175,27 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
   }, [nodes]);
 
   const onConnect = useCallback((params: Connection | Edge) => {
-    setEdges((eds) =>
-      addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } }, eds) as FlowEdge[]
-    );
+    setEdges((eds) => {
+      if (!params.source) {
+        return addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 100 } }, eds) as FlowEdge[];
+      }
+
+      const outgoingFromSource = eds.filter((edge) => edge.source === params.source);
+      let nextEdges = eds;
+      let newEdgeWeight = 100;
+
+      // First branching connection: default to an intuitive 50/50 split.
+      if (outgoingFromSource.length === 1) {
+        nextEdges = eds.map((edge) =>
+          edge.id === outgoingFromSource[0].id
+            ? { ...edge, data: { ...(edge.data || {}), weight: 50 } }
+            : edge
+        );
+        newEdgeWeight = 50;
+      }
+
+      return addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: newEdgeWeight } }, nextEdges) as FlowEdge[];
+    });
   }, [setEdges]);
 
   const onNodeClick = (_: React.MouseEvent, node: Node) => {
@@ -231,16 +262,26 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
     if (!selectedEdge) return;
 
     const parsed = Number(value);
-    const nextWeight = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    const clampedWeight = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 0;
 
-    setEdges((eds) =>
-      eds.map((edge) => {
-        if (edge.id !== selectedEdge.id) return edge;
-        const updatedEdge: FlowEdge = { ...edge, data: { ...(edge.data || { weight: 1 }), weight: nextWeight } };
-        setSelectedEdge(updatedEdge);
-        return updatedEdge;
-      })
-    );
+    setEdges((eds) => {
+      const sameSourceEdges = eds.filter((edge) => edge.source === selectedEdge.source);
+      const shouldAutoBalancePair = sameSourceEdges.length === 2;
+
+      return eds.map((edge) => {
+        if (edge.id === selectedEdge.id) {
+          const updatedSelected: FlowEdge = { ...edge, data: { ...(edge.data || {}), weight: clampedWeight } };
+          setSelectedEdge(updatedSelected);
+          return updatedSelected;
+        }
+
+        if (shouldAutoBalancePair && edge.source === selectedEdge.source) {
+          return { ...edge, data: { ...(edge.data || {}), weight: 100 - clampedWeight } };
+        }
+
+        return edge;
+      });
+    });
   };
 
   const handleSimulate = () => {
@@ -255,7 +296,7 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
       edges: edges.map(e => ({
         source: e.source,
         target: e.target,
-        weight: (e.data as WeightedEdgeData | undefined)?.weight ?? 1
+        weight: (e.data as WeightedEdgeData | undefined)?.weight ?? 100
       })),
       jurisdiction
     };
@@ -414,17 +455,18 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
               <p><strong>To:</strong> {selectedEdge.target}</p>
             </div>
             <div className="flex flex-col gap-2 mt-2">
-              <Label>Routing Weight</Label>
+              <Label>Routing Percentage (%)</Label>
               <Input
                 type="number"
                 min="0"
-                step="0.1"
-                value={(selectedEdge.data as WeightedEdgeData | undefined)?.weight ?? 1}
+                max="100"
+                step="1"
+                value={(selectedEdge.data as WeightedEdgeData | undefined)?.weight ?? 100}
                 onChange={(e) => updateEdgeWeight(e.target.value)}
               />
               <p className="text-[10px] text-muted-foreground">
-                Outgoing edge flows are split by normalized weights from the same source node.
-                Example: west=2, east=1 routes ~66.7% west and ~33.3% east.
+                Set routing percentage for this edge (0-100). If this source has exactly two outgoing edges,
+                the other edge is auto-set to keep total at 100%.
               </p>
             </div>
           </>
