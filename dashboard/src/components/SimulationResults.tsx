@@ -11,23 +11,17 @@ export default function SimulationResults({ results }: { results: any }) {
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [playbackIndex, setPlaybackIndex] = useState<number>(0);
 
-  if (!results) {
-    return (
-      <Card className="h-[400px] flex items-center justify-center text-muted-foreground">
-        Run a simulation to view results.
-      </Card>
-    );
-  }
+  const nodes = results
+    ? Object.entries(results.nodes || {}).map(([id, data]: [string, any]) => ({
+        id,
+        ...data
+      }))
+    : [];
 
-  const nodes = Object.entries(results.nodes || {}).map(([id, data]: [string, any]) => ({
-    id,
-    ...data
-  }));
-
-  const totalPoints = nodes.length > 0 ? nodes[0].timeseries.length : 0;
-  const timestepSeconds = Number(results.simulation_timestep_seconds || 5);
+  const totalPoints = nodes.length > 0 ? nodes[0].timeseries?.length || 0 : 0;
+  const timestepSeconds = Number(results?.simulation_timestep_seconds || 5);
   const simulationDurationMinutes =
-    Number(results.simulation_duration_minutes) ||
+    Number(results?.simulation_duration_minutes) ||
     (totalPoints > 0 ? (totalPoints * timestepSeconds) / 60 : 0);
 
   useEffect(() => {
@@ -54,6 +48,14 @@ export default function SimulationResults({ results }: { results: any }) {
 
     return () => clearInterval(timer);
   }, [totalPoints, results]);
+
+  if (!results) {
+    return (
+      <Card className="h-[400px] flex items-center justify-center text-muted-foreground">
+        Run a simulation to view results.
+      </Card>
+    );
+  }
 
   const visibleNodes = nodes.map((node: any) => ({
     ...node,
