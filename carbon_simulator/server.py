@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 from fastapi.middleware.cors import CORSMiddleware
 from graph_engine import OperationsGraph, process_dynamic_graph
 import uvicorn
+import os
 
 app = FastAPI(title="Carbon Operations Map Engine", description="Dynamic simulation of carbon value chain with jurisdictional gap filling")
 
@@ -33,4 +34,8 @@ def simulate_graph(ops_graph: OperationsGraph, readings: int = 720):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        "server:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8000)),
+    )
