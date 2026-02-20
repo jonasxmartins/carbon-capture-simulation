@@ -6,7 +6,11 @@ from graph_engine import OperationsGraph, process_dynamic_graph
 import uvicorn
 import os
 
-app = FastAPI(title="Carbon Operations Map Engine", description="Dynamic simulation of carbon value chain with jurisdictional gap filling")
+app = FastAPI(
+    title="Carbon Operations Map Engine",
+    description="Dynamic simulation of carbon value chain with jurisdictional gap filling",
+    redirect_slashes=False,
+)
 
 # Add CORS middleware to allow requests from the React frontend
 app.add_middleware(
