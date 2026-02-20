@@ -1,0 +1,9 @@
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+rich>=13.0.0
+fastapi>=0.103.0
+uvicorn>=0.23.2
+networkx>=3.1
+scipy>=1.11.0
+
