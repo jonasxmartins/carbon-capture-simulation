@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -21,6 +21,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { InfoIcon } from 'lucide-react';
+
+type WeightedEdgeData = {
+  weight?: number;
+};
+
+type FlowEdge = Edge<WeightedEdgeData>;
 
 const initialNodes: Node[] = [
   {
@@ -81,15 +87,15 @@ const initialNodes: Node[] = [
   }
 ];
 
-const initialEdges: Edge[] = [
-  { id: 'e-c1-h', source: 'capture-1', target: 'transport-1', markerEnd: { type: MarkerType.ArrowClosed } },
-  { id: 'e-c2-h', source: 'capture-2', target: 'transport-1', markerEnd: { type: MarkerType.ArrowClosed } },
-  { id: 'e-h-w', source: 'transport-1', target: 'transport-2', markerEnd: { type: MarkerType.ArrowClosed } },
-  { id: 'e-h-e', source: 'transport-1', target: 'transport-3', markerEnd: { type: MarkerType.ArrowClosed } },
-  { id: 'e-w-s1', source: 'transport-2', target: 'storage-1', markerEnd: { type: MarkerType.ArrowClosed } },
-  { id: 'e-w-s2', source: 'transport-2', target: 'storage-2', markerEnd: { type: MarkerType.ArrowClosed } },
-  { id: 'e-e-s2', source: 'transport-3', target: 'storage-2', markerEnd: { type: MarkerType.ArrowClosed } },
-  { id: 'e-e-u1', source: 'transport-3', target: 'utilization-1', markerEnd: { type: MarkerType.ArrowClosed } },
+const initialEdges: FlowEdge[] = [
+  { id: 'e-c1-h', source: 'capture-1', target: 'transport-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
+  { id: 'e-c2-h', source: 'capture-2', target: 'transport-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
+  { id: 'e-h-w', source: 'transport-1', target: 'transport-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
+  { id: 'e-h-e', source: 'transport-1', target: 'transport-3', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
+  { id: 'e-w-s1', source: 'transport-2', target: 'storage-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
+  { id: 'e-w-s2', source: 'transport-2', target: 'storage-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
+  { id: 'e-e-s2', source: 'transport-3', target: 'storage-2', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
+  { id: 'e-e-u1', source: 'transport-3', target: 'utilization-1', markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } },
 ];
 
 const frameworkInfo: Record<string, { label: string; description: string }> = {
@@ -113,10 +119,24 @@ const frameworkInfo: Record<string, { label: string; description: string }> = {
 
 export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, options: { durationMinutes: number }) => void }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>(initialEdges);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<FlowEdge | null>(null);
   const [jurisdiction, setJurisdiction] = useState('epa');
   const [durationMinutes, setDurationMinutes] = useState('12');
+
+  const displayEdges = useMemo(
+    () =>
+      edges.map((edge) => ({
+        ...edge,
+        label: `w=${((edge.data as WeightedEdgeData | undefined)?.weight ?? 1).toFixed(1)}`,
+        labelStyle: { fill: '#334155', fontSize: 11, fontWeight: 600 },
+        labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
+        labelBgPadding: [4, 2] as [number, number],
+        labelBgBorderRadius: 3,
+      })),
+    [edges]
+  );
 
   // Validate connections between nodes to ensure physical constraints
   const isValidConnection = useCallback((connection: Connection | Edge) => {
@@ -142,15 +162,24 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
   }, [nodes]);
 
   const onConnect = useCallback((params: Connection | Edge) => {
-    setEdges((eds) => addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
+    setEdges((eds) =>
+      addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed }, data: { weight: 1 } }, eds) as FlowEdge[]
+    );
   }, [setEdges]);
 
   const onNodeClick = (_: React.MouseEvent, node: Node) => {
     setSelectedNode(node);
+    setSelectedEdge(null);
+  };
+
+  const onEdgeClick = (_: React.MouseEvent, edge: Edge) => {
+    setSelectedEdge(edge as FlowEdge);
+    setSelectedNode(null);
   };
 
   const onPaneClick = () => {
     setSelectedNode(null);
+    setSelectedEdge(null);
   };
 
   const addNode = (type: string) => {
@@ -198,6 +227,22 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
     );
   };
 
+  const updateEdgeWeight = (value: string) => {
+    if (!selectedEdge) return;
+
+    const parsed = Number(value);
+    const nextWeight = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+
+    setEdges((eds) =>
+      eds.map((edge) => {
+        if (edge.id !== selectedEdge.id) return edge;
+        const updatedEdge: FlowEdge = { ...edge, data: { ...(edge.data || { weight: 1 }), weight: nextWeight } };
+        setSelectedEdge(updatedEdge);
+        return updatedEdge;
+      })
+    );
+  };
+
   const handleSimulate = () => {
     const graphData = {
       nodes: nodes.map(n => ({
@@ -209,7 +254,8 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
       })),
       edges: edges.map(e => ({
         source: e.source,
-        target: e.target
+        target: e.target,
+        weight: (e.data as WeightedEdgeData | undefined)?.weight ?? 1
       })),
       jurisdiction
     };
@@ -221,11 +267,12 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
       <div className="flex-1 relative">
         <ReactFlow
           nodes={nodes}
-          edges={edges}
+          edges={displayEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={onNodeClick}
+          onEdgeClick={onEdgeClick}
           onPaneClick={onPaneClick}
           isValidConnection={isValidConnection}
           fitView
@@ -357,6 +404,28 @@ export default function OperationsMap({ onSimulate }: { onSimulate: (data: any, 
                 <Input type="number" step="0.01" min="0" max="1" value={(selectedNode.data.params as any)?.dropout_rate || 0} onChange={(e) => updateNodeData('dropout_rate', e.target.value, true)} />
                 <p className="text-[10px] text-muted-foreground mt-1">Probability of sensor failure per reading (generates missing data for gap-filling algorithms).</p>
               </div>
+            </div>
+          </>
+        ) : selectedEdge ? (
+          <>
+            <h3 className="font-bold text-lg border-b pb-2">Edge Properties</h3>
+            <div className="text-sm text-slate-600">
+              <p><strong>From:</strong> {selectedEdge.source}</p>
+              <p><strong>To:</strong> {selectedEdge.target}</p>
+            </div>
+            <div className="flex flex-col gap-2 mt-2">
+              <Label>Routing Weight</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.1"
+                value={(selectedEdge.data as WeightedEdgeData | undefined)?.weight ?? 1}
+                onChange={(e) => updateEdgeWeight(e.target.value)}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Outgoing edge flows are split by normalized weights from the same source node.
+                Example: west=2, east=1 routes ~66.7% west and ~33.3% east.
+              </p>
             </div>
           </>
         ) : (

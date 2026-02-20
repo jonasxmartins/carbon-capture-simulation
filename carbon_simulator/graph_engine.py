@@ -16,6 +16,7 @@ class Node(BaseModel):
 class Edge(BaseModel):
     source: str
     target: str
+    weight: Optional[float] = 1.0
 
 class OperationsGraph(BaseModel):
     nodes: List[Node]
@@ -28,7 +29,10 @@ def create_graph(ops_graph: OperationsGraph) -> nx.DiGraph:
     for node in ops_graph.nodes:
         G.add_node(node.id, **node.dict())
     for edge in ops_graph.edges:
-        G.add_edge(edge.source, edge.target)
+        edge_payload = edge.dict()
+        source = edge_payload.pop('source')
+        target = edge_payload.pop('target')
+        G.add_edge(source, target, **edge_payload)
     return G
 
 def simulate_node_data(node_type: str, params: Dict[str, Any], n_readings: int, start_time: datetime) -> pd.DataFrame:
@@ -149,18 +153,36 @@ def process_dynamic_graph(ops_graph: OperationsGraph, n_readings: int = 720):
                 flow = pd.Series(0, index=timestamps)
         else:
             # Sum predecessor contributions while conserving mass across fan-out.
-            # Each predecessor's outflow is split evenly across its outgoing edges.
+            # Each predecessor's outflow is distributed by normalized outgoing edge weights.
             valid_preds = []
             for p in preds:
                 pred_flow = node_flows.get(p)
                 if pred_flow is None:
                     continue
 
-                successors_count = G.out_degree(p)
-                if successors_count > 1:
-                    valid_preds.append(pred_flow / successors_count)
+                successors = list(G.successors(p))
+                if not successors:
+                    continue
+
+                outgoing_weights = []
+                for succ in successors:
+                    raw_weight = G.edges[p, succ].get('weight', 1.0)
+                    weight = float(raw_weight) if raw_weight is not None else 1.0
+                    if not np.isfinite(weight) or weight < 0:
+                        weight = 0.0
+                    outgoing_weights.append(weight)
+
+                total_weight = sum(outgoing_weights)
+                if total_weight > 0:
+                    this_raw_weight = G.edges[p, node_id].get('weight', 1.0)
+                    this_weight = float(this_raw_weight) if this_raw_weight is not None else 1.0
+                    if not np.isfinite(this_weight) or this_weight < 0:
+                        this_weight = 0.0
+                    split_ratio = this_weight / total_weight
                 else:
-                    valid_preds.append(pred_flow)
+                    split_ratio = 1 / len(successors)
+
+                valid_preds.append(pred_flow * split_ratio)
 
             if valid_preds:
                 flow = sum(valid_preds)
