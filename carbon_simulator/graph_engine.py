@@ -72,6 +72,7 @@ def process_dynamic_graph(ops_graph: OperationsGraph, n_readings: int = 720):
     G = create_graph(ops_graph)
     start_time = datetime(2024, 1, 1)
     timestep_seconds = 5
+    timestep_minutes = timestep_seconds / 60
     
     # 1. Simulate Raw Data
     raw_data_dict = {}
@@ -123,6 +124,12 @@ def process_dynamic_graph(ops_graph: OperationsGraph, n_readings: int = 720):
     for node_id in nodes_order:
         data = G.nodes[node_id]
         filled_df = filled_data_dict.get(node_id)
+
+        if filled_df is not None and not filled_df.empty:
+            if 'EFFICIENCY' in filled_df.columns:
+                filled_df['EFFICIENCY'] = filled_df['EFFICIENCY'].clip(lower=0, upper=100)
+            if 'CONVERSION_RATE' in filled_df.columns:
+                filled_df['CONVERSION_RATE'] = filled_df['CONVERSION_RATE'].clip(lower=0, upper=100)
         
         # Get inputs from predecessors
         preds = list(G.predecessors(node_id))
@@ -141,9 +148,20 @@ def process_dynamic_graph(ops_graph: OperationsGraph, n_readings: int = 720):
                 timestamps = [start_time + pd.Timedelta(seconds=timestep_seconds*i) for i in range(n_readings)]
                 flow = pd.Series(0, index=timestamps)
         else:
-            # Sum inputs
-            # Make sure all predecessors have flows calculated
-            valid_preds = [node_flows[p] for p in preds if p in node_flows and node_flows[p] is not None]
+            # Sum predecessor contributions while conserving mass across fan-out.
+            # Each predecessor's outflow is split evenly across its outgoing edges.
+            valid_preds = []
+            for p in preds:
+                pred_flow = node_flows.get(p)
+                if pred_flow is None:
+                    continue
+
+                successors_count = G.out_degree(p)
+                if successors_count > 1:
+                    valid_preds.append(pred_flow / successors_count)
+                else:
+                    valid_preds.append(pred_flow)
+
             if valid_preds:
                 flow = sum(valid_preds)
             else:
@@ -168,9 +186,9 @@ def process_dynamic_graph(ops_graph: OperationsGraph, n_readings: int = 720):
         
         # Aggregate system-level KPIs by physical component role.
         if data['type'] == 'capture':
-            total_captured_co2 += flow.sum() / 1000
+            total_captured_co2 += (flow.sum() * timestep_minutes) / 1000
         if data['type'] in ['storage', 'utilization']:
-            total_stored_or_utilized_co2 += flow.sum() / 1000
+            total_stored_or_utilized_co2 += (flow.sum() * timestep_minutes) / 1000
             
         # Join with filled_df to include raw params like EFFICIENCY and LEAKAGE
         if filled_df is not None and not filled_df.empty:
@@ -184,7 +202,7 @@ def process_dynamic_graph(ops_graph: OperationsGraph, n_readings: int = 720):
         # Convert to object dtype first so None is preserved instead of cast back to NaN.
         flow_df = flow_df.astype(object).where(pd.notnull(flow_df), None)
 
-        flow_total_tonnes = float(flow.sum() / 1000)
+        flow_total_tonnes = float((flow.sum() * timestep_minutes) / 1000)
         if not np.isfinite(flow_total_tonnes):
             flow_total_tonnes = 0.0
             
