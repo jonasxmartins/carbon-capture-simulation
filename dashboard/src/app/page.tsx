@@ -28,7 +28,7 @@ export default function Home() {
       setResults(response.data.data);
     } catch (err: any) {
       console.error(err);
-      setError(err.response?.data?.detail || "Simulation failed to run.");
+      setError(err.response?.data?.detail || err.message || "Simulation failed to run.");
     } finally {
       setLoading(false);
     }
